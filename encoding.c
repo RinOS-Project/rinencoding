@@ -3,6 +3,7 @@
 #include "../rinsecure/include/rinsecure/memory.h"
 
 #include <limits.h>
+#include <string.h>
 
 static int rin_encoding_output_valid(uint8_t* output, size_t capacity,
                                      size_t* output_size)
@@ -207,6 +208,286 @@ int rin_encoding_base64url_decode(const uint8_t* input, size_t input_size,
         input, input_size, RIN_ENCODING_BASE64_URL_SAFE,
         RIN_ENCODING_BASE64_ALLOW_UNPADDED, output, output_capacity,
         output_size);
+}
+
+static int rin_encoding_pem_label_char(unsigned char value)
+{
+    return (value >= (unsigned char)'A' && value <= (unsigned char)'Z') ||
+           (value >= (unsigned char)'a' && value <= (unsigned char)'z') ||
+           (value >= (unsigned char)'0' && value <= (unsigned char)'9') ||
+           value == (unsigned char)' ' || value == (unsigned char)'-';
+}
+
+static int rin_encoding_pem_label_bytes_valid(const uint8_t* label,
+                                              size_t label_size)
+{
+    size_t index;
+    if (label == NULL || label_size == 0u ||
+        label_size > RIN_ENCODING_PEM_LABEL_MAX ||
+        !((label[0] >= (uint8_t)'A' && label[0] <= (uint8_t)'Z') ||
+          (label[0] >= (uint8_t)'a' && label[0] <= (uint8_t)'z') ||
+          (label[0] >= (uint8_t)'0' && label[0] <= (uint8_t)'9') ||
+          label[0] == (uint8_t)'-') ||
+        !((label[label_size - 1u] >= (uint8_t)'A' &&
+           label[label_size - 1u] <= (uint8_t)'Z') ||
+          (label[label_size - 1u] >= (uint8_t)'a' &&
+           label[label_size - 1u] <= (uint8_t)'z') ||
+          (label[label_size - 1u] >= (uint8_t)'0' &&
+           label[label_size - 1u] <= (uint8_t)'9') ||
+          label[label_size - 1u] == (uint8_t)'-'))
+        return 0;
+    for (index = 0u; index < label_size; ++index) {
+        if (!rin_encoding_pem_label_char(label[index]) ||
+            (index != 0u && label[index] == (uint8_t)' ' &&
+             label[index - 1u] == (uint8_t)' '))
+            return 0;
+    }
+    return 1;
+}
+
+static int rin_encoding_pem_label_size(const char* label, size_t* size_out)
+{
+    size_t size = 0u;
+    if (size_out != NULL) *size_out = 0u;
+    if (label == NULL || size_out == NULL) return 0;
+    while (size < RIN_ENCODING_PEM_LABEL_MAX && label[size] != '\0')
+        ++size;
+    if (label[size] != '\0' ||
+        !rin_encoding_pem_label_bytes_valid((const uint8_t*)label, size))
+        return 0;
+    *size_out = size;
+    return 1;
+}
+
+static int rin_encoding_pem_add_size(size_t* total, size_t value)
+{
+    if (total == NULL || value > SIZE_MAX - *total) return 0;
+    *total += value;
+    return 1;
+}
+
+size_t rin_encoding_pem_encoded_size(const char* label, size_t input_size)
+{
+    size_t label_size;
+    size_t body_size;
+    size_t line_count;
+    size_t total = 0u;
+    if (input_size == 0u || !rin_encoding_pem_label_size(label, &label_size))
+        return SIZE_MAX;
+    body_size = rin_encoding_base64_encoded_size(input_size, 1);
+    if (body_size == SIZE_MAX) return SIZE_MAX;
+    line_count = body_size == 0u ? 0u : (body_size - 1u) / 64u + 1u;
+    if (!rin_encoding_pem_add_size(&total, 17u + label_size) ||
+        !rin_encoding_pem_add_size(&total, body_size) ||
+        !rin_encoding_pem_add_size(&total, line_count) ||
+        !rin_encoding_pem_add_size(&total, 15u + label_size))
+        return SIZE_MAX;
+    return total;
+}
+
+int rin_encoding_pem_encode(const char* label, const uint8_t* input,
+                            size_t input_size, uint8_t* output,
+                            size_t output_capacity, size_t* output_size)
+{
+    static const uint8_t begin_prefix[] = "-----BEGIN ";
+    static const uint8_t end_prefix[] = "-----END ";
+    uint8_t line[64];
+    size_t label_size;
+    size_t required;
+    size_t offset = 0u;
+    size_t written = 0u;
+    if (!rin_encoding_output_valid(output, output_capacity, output_size))
+        return RIN_ENCODING_INVALID_ARGUMENT;
+    if (input_size == 0u || input == NULL ||
+        !rin_encoding_pem_label_size(label, &label_size))
+        return RIN_ENCODING_INVALID_ARGUMENT;
+    required = rin_encoding_pem_encoded_size(label, input_size);
+    if (required == SIZE_MAX) return RIN_ENCODING_OVERFLOW;
+    if (required > output_capacity) return RIN_ENCODING_BUFFER_TOO_SMALL;
+    if (output == NULL) return RIN_ENCODING_INVALID_ARGUMENT;
+
+    memcpy(output + written, begin_prefix, sizeof(begin_prefix) - 1u);
+    written += sizeof(begin_prefix) - 1u;
+    memcpy(output + written, label, label_size);
+    written += label_size;
+    memcpy(output + written, "-----\n", 6u);
+    written += 6u;
+    while (offset < input_size) {
+        const size_t remaining = input_size - offset;
+        const size_t chunk = remaining > 48u ? 48u : remaining;
+        size_t line_size = 0u;
+        if (rin_encoding_base64_encode(
+                input + offset, chunk, RIN_ENCODING_BASE64_STANDARD, 1,
+                line, sizeof(line), &line_size) != RIN_ENCODING_OK ||
+            line_size == 0u || line_size > sizeof(line)) {
+            rin_secure_zero(line, sizeof(line));
+            rin_secure_zero(output, output_capacity);
+            *output_size = 0u;
+            return RIN_ENCODING_INVALID_ARGUMENT;
+        }
+        memcpy(output + written, line, line_size);
+        written += line_size;
+        output[written++] = (uint8_t)'\n';
+        offset += chunk;
+    }
+    memcpy(output + written, end_prefix, sizeof(end_prefix) - 1u);
+    written += sizeof(end_prefix) - 1u;
+    memcpy(output + written, label, label_size);
+    written += label_size;
+    memcpy(output + written, "-----\n", 6u);
+    written += 6u;
+    rin_secure_zero(line, sizeof(line));
+    *output_size = written;
+    return RIN_ENCODING_OK;
+}
+
+static int rin_encoding_pem_read_line(const uint8_t* input, size_t input_size,
+                                      size_t offset, size_t* content_end,
+                                      size_t* next_offset)
+{
+    size_t end;
+    if (input == NULL || content_end == NULL || next_offset == NULL)
+        return RIN_ENCODING_INVALID_ARGUMENT;
+    if (offset >= input_size)
+        return RIN_ENCODING_MALFORMED;
+    for (end = offset; end < input_size && input[end] != (uint8_t)'\n'; ++end)
+        ;
+    if (end == input_size) return RIN_ENCODING_MALFORMED;
+    *content_end = end;
+    if (*content_end > offset && input[*content_end - 1u] == (uint8_t)'\r')
+        --*content_end;
+    *next_offset = end + 1u;
+    return RIN_ENCODING_OK;
+}
+
+static int rin_encoding_pem_decode_fail(uint8_t* output, size_t output_capacity,
+                                        char* label_output,
+                                        size_t label_capacity, size_t* output_size,
+                                        int status)
+{
+    if (output != NULL && output_capacity != 0u)
+        rin_secure_zero(output, output_capacity);
+    if (label_output != NULL && label_capacity != 0u)
+        rin_secure_zero(label_output, label_capacity);
+    if (output_size != NULL) *output_size = 0u;
+    return status;
+}
+
+int rin_encoding_pem_decode(const uint8_t* input, size_t input_size,
+                            char* label_output, size_t label_capacity,
+                            uint8_t* output, size_t output_capacity,
+                            size_t* output_size)
+{
+    static const uint8_t begin_prefix[] = "-----BEGIN ";
+    static const uint8_t end_prefix[] = "-----END ";
+    RinEncodingBase64Decoder decoder;
+    size_t content_end;
+    size_t next_offset;
+    size_t label_start;
+    size_t label_size;
+    size_t offset;
+    size_t written = 0u;
+    int previous_short = 0;
+    int body_lines = 0;
+    int status;
+
+    if (output_size == NULL) return RIN_ENCODING_INVALID_ARGUMENT;
+    *output_size = 0u;
+    if (label_output != NULL && label_capacity != 0u)
+        rin_secure_zero(label_output, label_capacity);
+    if (output != NULL && output_capacity != 0u)
+        rin_secure_zero(output, output_capacity);
+    if (input == NULL || input_size == 0u || label_output == NULL ||
+        label_capacity == 0u || output == NULL || output_capacity == 0u)
+        return RIN_ENCODING_INVALID_ARGUMENT;
+
+    status = rin_encoding_pem_read_line(input, input_size, 0u,
+                                        &content_end, &next_offset);
+    if (status != RIN_ENCODING_OK || content_end < sizeof(begin_prefix) - 1u + 6u ||
+        memcmp(input, begin_prefix, sizeof(begin_prefix) - 1u) != 0)
+        return rin_encoding_pem_decode_fail(output, output_capacity,
+                                             label_output, label_capacity,
+                                             output_size, RIN_ENCODING_MALFORMED);
+    label_start = sizeof(begin_prefix) - 1u;
+    label_size = content_end - label_start - 5u;
+    if (!rin_encoding_pem_label_bytes_valid(input + label_start, label_size) ||
+        label_capacity <= label_size ||
+        memcmp(input + content_end - 5u, "-----", 5u) != 0)
+        return rin_encoding_pem_decode_fail(output, output_capacity,
+                                             label_output, label_capacity,
+                                             output_size, RIN_ENCODING_MALFORMED);
+    memcpy(label_output, input + label_start, label_size);
+    label_output[label_size] = '\0';
+
+    status = rin_encoding_base64_decoder_init(
+        &decoder, RIN_ENCODING_BASE64_STANDARD,
+        RIN_ENCODING_BASE64_PADDING_REQUIRED);
+    if (status != RIN_ENCODING_OK)
+        return rin_encoding_pem_decode_fail(output, output_capacity,
+                                             label_output, label_capacity,
+                                             output_size, status);
+    offset = next_offset;
+    for (;;) {
+        size_t line_size;
+        size_t consumed = 0u;
+        size_t produced = 0u;
+        if (rin_encoding_pem_read_line(input, input_size, offset,
+                                       &content_end, &next_offset) !=
+            RIN_ENCODING_OK)
+            return rin_encoding_pem_decode_fail(output, output_capacity,
+                                                 label_output, label_capacity,
+                                                 output_size, RIN_ENCODING_MALFORMED);
+        line_size = content_end - offset;
+        if (line_size >= sizeof(end_prefix) - 1u &&
+            memcmp(input + offset, end_prefix, sizeof(end_prefix) - 1u) == 0) {
+            const size_t footer_prefix_size = sizeof(end_prefix) - 1u;
+            if (body_lines == 0 || line_size < footer_prefix_size + 6u ||
+                next_offset != input_size ||
+                memcmp(input + content_end - 5u, "-----", 5u) != 0)
+                return rin_encoding_pem_decode_fail(
+                    output, output_capacity, label_output, label_capacity,
+                    output_size, RIN_ENCODING_MALFORMED);
+            {
+                const size_t footer_label_start =
+                    offset + footer_prefix_size;
+                const size_t footer_label_size = line_size -
+                    footer_prefix_size - 5u;
+                if (footer_label_size != label_size ||
+                    memcmp(input + footer_label_start, label_output,
+                           label_size) != 0)
+                    return rin_encoding_pem_decode_fail(
+                        output, output_capacity, label_output, label_capacity,
+                        output_size, RIN_ENCODING_MALFORMED);
+            }
+            status = rin_encoding_base64_decoder_final(
+                &decoder, output + written, output_capacity - written,
+                &produced);
+            if (status != RIN_ENCODING_OK)
+                return rin_encoding_pem_decode_fail(
+                    output, output_capacity, label_output, label_capacity,
+                    output_size, status);
+            written += produced;
+            *output_size = written;
+            return RIN_ENCODING_OK;
+        }
+        if (previous_short || line_size == 0u || line_size > 64u ||
+            (line_size % 4u) != 0u)
+            return rin_encoding_pem_decode_fail(
+                output, output_capacity, label_output, label_capacity,
+                output_size, RIN_ENCODING_MALFORMED);
+        status = rin_encoding_base64_decoder_update(
+            &decoder, input + offset, line_size, output + written,
+            output_capacity - written, &consumed, &produced);
+        if (status != RIN_ENCODING_OK || consumed != line_size)
+            return rin_encoding_pem_decode_fail(
+                output, output_capacity, label_output, label_capacity,
+                output_size, status == RIN_ENCODING_BUFFER_TOO_SMALL
+                    ? status : RIN_ENCODING_MALFORMED);
+        written += produced;
+        previous_short = line_size < 64u;
+        ++body_lines;
+        offset = next_offset;
+    }
 }
 
 static int rin_encoding_base64_alphabet_valid(

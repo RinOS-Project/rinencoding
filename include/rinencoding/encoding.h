@@ -52,6 +52,22 @@ int rin_encoding_base64url_decode(const uint8_t* input, size_t input_size,
                                   uint8_t* output, size_t output_capacity,
                                   size_t* output_size);
 
+/* Strict, bounded PEM armor for opaque key/certificate payloads.  The
+ * encoder emits LF-terminated lines with at most 64 Base64 characters.  The
+ * decoder accepts LF or CRLF line endings but rejects headers, labels, body
+ * whitespace, trailing data, and mismatched BEGIN/END labels.  This helper
+ * owns only the byte encoding; key type semantics and secret storage remain
+ * with the private key owner. */
+#define RIN_ENCODING_PEM_LABEL_MAX 64u
+size_t rin_encoding_pem_encoded_size(const char* label, size_t input_size);
+int rin_encoding_pem_encode(const char* label, const uint8_t* input,
+                            size_t input_size, uint8_t* output,
+                            size_t output_capacity, size_t* output_size);
+int rin_encoding_pem_decode(const uint8_t* input, size_t input_size,
+                            char* label_output, size_t label_capacity,
+                            uint8_t* output, size_t output_capacity,
+                            size_t* output_size);
+
 /* Allocation-free incremental Base64 encoder.  update() reports the input
  * bytes it accepted; when output capacity is exhausted it may return
  * RIN_ENCODING_BUFFER_TOO_SMALL with a complete pending block retained in
