@@ -18,6 +18,14 @@ static int rin_encoding_output_valid(uint8_t* output, size_t capacity,
     return 1;
 }
 
+static int rin_encoding_failure(uint8_t* output, size_t capacity,
+                                size_t* output_size, int status)
+{
+    if (output_size != NULL) *output_size = 0u;
+    if (output != NULL && capacity != 0u) rin_secure_zero(output, capacity);
+    return status;
+}
+
 size_t rin_encoding_base64_encoded_size(size_t input_size, int padded)
 {
     size_t groups;
@@ -118,49 +126,75 @@ int rin_encoding_base64_decode(const uint8_t* input, size_t input_size,
     int allow_unpadded;
     if (!rin_encoding_output_valid(output, output_capacity, output_size))
         return RIN_ENCODING_INVALID_ARGUMENT;
-    if (input_size != 0u && input == NULL) return RIN_ENCODING_INVALID_ARGUMENT;
+    if (input_size != 0u && input == NULL)
+        return rin_encoding_failure(output, output_capacity, output_size,
+                                    RIN_ENCODING_INVALID_ARGUMENT);
     if (alphabet != RIN_ENCODING_BASE64_STANDARD &&
         alphabet != RIN_ENCODING_BASE64_URL_SAFE)
-        return RIN_ENCODING_INVALID_ARGUMENT;
+        return rin_encoding_failure(output, output_capacity, output_size,
+                                    RIN_ENCODING_INVALID_ARGUMENT);
     if ((flags & RIN_ENCODING_BASE64_PADDING_REQUIRED) != 0u &&
         (flags & RIN_ENCODING_BASE64_ALLOW_UNPADDED) != 0u)
-        return RIN_ENCODING_INVALID_ARGUMENT;
+        return rin_encoding_failure(output, output_capacity, output_size,
+                                    RIN_ENCODING_INVALID_ARGUMENT);
     allow_unpadded = (flags & RIN_ENCODING_BASE64_ALLOW_UNPADDED) != 0u;
     for (index = 0u; index < input_size; ++index) {
         const unsigned char value = input[index];
         int digit;
         if (rin_encoding_base64_space(value)) {
             if ((flags & RIN_ENCODING_BASE64_ALLOW_WHITESPACE) == 0u)
-                return RIN_ENCODING_MALFORMED;
+                return rin_encoding_failure(output, output_capacity, output_size,
+                                            RIN_ENCODING_MALFORMED);
             continue;
         }
-        if (saw_padding) return RIN_ENCODING_MALFORMED;
+        if (saw_padding)
+            return rin_encoding_failure(output, output_capacity, output_size,
+                                        RIN_ENCODING_MALFORMED);
         if (value == (unsigned char)'=') {
-            if (quartet_size < 2u) return RIN_ENCODING_MALFORMED;
+            if (quartet_size < 2u)
+                return rin_encoding_failure(output, output_capacity, output_size,
+                                            RIN_ENCODING_MALFORMED);
             quartet[quartet_size++] = -2;
         } else {
             digit = rin_encoding_base64_digit(value, alphabet);
-            if (digit < 0 || quartet_size >= 4u) return RIN_ENCODING_MALFORMED;
+            if (digit < 0 || quartet_size >= 4u)
+                return rin_encoding_failure(output, output_capacity, output_size,
+                                            RIN_ENCODING_MALFORMED);
             quartet[quartet_size++] = digit;
         }
         if (quartet_size != 4u) continue;
-        if (quartet[0] < 0 || quartet[1] < 0) return RIN_ENCODING_MALFORMED;
+        if (quartet[0] < 0 || quartet[1] < 0)
+            return rin_encoding_failure(output, output_capacity, output_size,
+                                        RIN_ENCODING_MALFORMED);
         if (written == output_capacity || output == NULL)
-            return RIN_ENCODING_BUFFER_TOO_SMALL;
+            return rin_encoding_failure(output, output_capacity, output_size,
+                                        RIN_ENCODING_BUFFER_TOO_SMALL);
         output[written++] = (uint8_t)((quartet[0] << 2u) | (quartet[1] >> 4u));
         if (quartet[2] == -2) {
-            if (quartet[3] != -2 || (quartet[1] & 15) != 0) return RIN_ENCODING_MALFORMED;
+            if (quartet[3] != -2 || (quartet[1] & 15) != 0)
+                return rin_encoding_failure(output, output_capacity, output_size,
+                                            RIN_ENCODING_MALFORMED);
             saw_padding = 1;
         } else {
-            if (quartet[2] < 0) return RIN_ENCODING_MALFORMED;
-            if (written == output_capacity) return RIN_ENCODING_BUFFER_TOO_SMALL;
+            if (quartet[2] < 0)
+                return rin_encoding_failure(output, output_capacity, output_size,
+                                            RIN_ENCODING_MALFORMED);
+            if (written == output_capacity)
+                return rin_encoding_failure(output, output_capacity, output_size,
+                                            RIN_ENCODING_BUFFER_TOO_SMALL);
             output[written++] = (uint8_t)((quartet[1] << 4u) | (quartet[2] >> 2u));
             if (quartet[3] == -2) {
-                if ((quartet[2] & 3) != 0) return RIN_ENCODING_MALFORMED;
+                if ((quartet[2] & 3) != 0)
+                    return rin_encoding_failure(output, output_capacity, output_size,
+                                                RIN_ENCODING_MALFORMED);
                 saw_padding = 1;
             } else {
-                if (quartet[3] < 0) return RIN_ENCODING_MALFORMED;
-                if (written == output_capacity) return RIN_ENCODING_BUFFER_TOO_SMALL;
+                if (quartet[3] < 0)
+                    return rin_encoding_failure(output, output_capacity, output_size,
+                                                RIN_ENCODING_MALFORMED);
+                if (written == output_capacity)
+                    return rin_encoding_failure(output, output_capacity, output_size,
+                                                RIN_ENCODING_BUFFER_TOO_SMALL);
                 output[written++] = (uint8_t)((quartet[2] << 6u) | quartet[3]);
             }
         }
@@ -168,18 +202,26 @@ int rin_encoding_base64_decode(const uint8_t* input, size_t input_size,
     }
     if (quartet_size != 0u) {
         if (!allow_unpadded || saw_padding || quartet_size == 1u)
-            return RIN_ENCODING_MALFORMED;
+            return rin_encoding_failure(output, output_capacity, output_size,
+                                        RIN_ENCODING_MALFORMED);
         if (written == output_capacity || output == NULL)
-            return RIN_ENCODING_BUFFER_TOO_SMALL;
+            return rin_encoding_failure(output, output_capacity, output_size,
+                                        RIN_ENCODING_BUFFER_TOO_SMALL);
         output[written++] = (uint8_t)((quartet[0] << 2u) | (quartet[1] >> 4u));
         if (quartet_size == 3u) {
             if (quartet[2] < 0)
-                return RIN_ENCODING_MALFORMED;
-            if (written == output_capacity) return RIN_ENCODING_BUFFER_TOO_SMALL;
+                return rin_encoding_failure(output, output_capacity, output_size,
+                                            RIN_ENCODING_MALFORMED);
+            if (written == output_capacity)
+                return rin_encoding_failure(output, output_capacity, output_size,
+                                            RIN_ENCODING_BUFFER_TOO_SMALL);
             output[written++] = (uint8_t)((quartet[1] << 4u) | (quartet[2] >> 2u));
-            if ((quartet[2] & 3) != 0) return RIN_ENCODING_MALFORMED;
+            if ((quartet[2] & 3) != 0)
+                return rin_encoding_failure(output, output_capacity, output_size,
+                                            RIN_ENCODING_MALFORMED);
         } else if ((quartet[1] & 15) != 0) {
-            return RIN_ENCODING_MALFORMED;
+            return rin_encoding_failure(output, output_capacity, output_size,
+                                        RIN_ENCODING_MALFORMED);
         }
     }
     *output_size = written;
