@@ -706,6 +706,29 @@ static int rin_encoding_base64_decoder_emit_quartet(
     return RIN_ENCODING_OK;
 }
 
+static int rin_encoding_base64_decoder_state_valid(
+    const RinEncodingBase64Decoder* decoder)
+{
+    size_t index;
+    if (decoder == NULL || !rin_encoding_base64_alphabet_valid(decoder->alphabet) ||
+        !rin_encoding_base64_flags_valid(decoder->flags) ||
+        decoder->quartet_size > 4u || decoder->saw_padding > 1u)
+        return 0;
+    if (decoder->saw_padding != 0u && decoder->quartet_size != 0u)
+        return 0;
+    for (index = 0u; index < decoder->quartet_size; ++index) {
+        const int value = decoder->quartet[index];
+        if (value == -2) {
+            if (index < 2u ||
+                (index == 2u && decoder->quartet_size == 4u &&
+                 decoder->quartet[3] != -2))
+                return 0;
+        } else if (value < 0 || value > 63)
+            return 0;
+    }
+    return 1;
+}
+
 int rin_encoding_base64_decoder_init(RinEncodingBase64Decoder* decoder,
                                      RinEncodingBase64Alphabet alphabet,
                                      unsigned flags)
@@ -736,8 +759,7 @@ int rin_encoding_base64_decoder_update(RinEncodingBase64Decoder* decoder,
         !rin_encoding_output_valid(output, output_capacity, output_size))
         return RIN_ENCODING_INVALID_ARGUMENT;
     if (decoder == NULL || decoder->finalized != 0u ||
-        !rin_encoding_base64_alphabet_valid(decoder->alphabet) ||
-        decoder->quartet_size > 4u ||
+        !rin_encoding_base64_decoder_state_valid(decoder) ||
         (input_size != 0u && input == NULL))
         return RIN_ENCODING_INVALID_ARGUMENT;
     while (input_index < input_size || decoder->quartet_size == 4u) {
@@ -801,8 +823,7 @@ int rin_encoding_base64_decoder_final(RinEncodingBase64Decoder* decoder,
     if (!rin_encoding_output_valid(output, output_capacity, output_size))
         return RIN_ENCODING_INVALID_ARGUMENT;
     if (decoder == NULL || decoder->finalized != 0u ||
-        !rin_encoding_base64_alphabet_valid(decoder->alphabet) ||
-        decoder->quartet_size > 4u)
+        !rin_encoding_base64_decoder_state_valid(decoder))
         return RIN_ENCODING_INVALID_ARGUMENT;
     if (decoder->quartet_size == 4u) {
         const int status = rin_encoding_base64_decoder_emit_quartet(

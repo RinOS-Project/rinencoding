@@ -12,7 +12,7 @@ Bounded Base64/Base64URL, PEM, hex, quoted-printable, RFC 2047 payload, and perc
 | ownership | Inputs, outputs, and streaming state are caller-owned; one-shot output size and the complete caller-provided output capacity are cleared on failure. |
 | thread-safety | One-shot calls are independent; streaming state is mutable and must be serialized. |
 | limits | Counted inputs, checked size calculations, and caller-provided output capacity; overflow is rejected. |
-| errors | RinEncodingStatus distinguishes malformed, invalid, short-buffer, and overflow. |
+| errors | RinEncodingStatus distinguishes malformed, invalid, short-buffer, and overflow. Caller-owned streaming state is validated at every update/final boundary; corrupted alphabet, policy flags, padding marker, or quartet digit state fails closed before output is written. |
 | ABI stability | C source interface; public streaming structs require coordinated rebuild on layout changes. |
 | security | Malformed data and unknown Base64 policy flags are rejected; failed one-shot output is cleared after partial writes as well; decoding is not authorization or canonicalization. |
 | build | No standalone build file; compile encoding.c through a consumer build with RinSecure. |
