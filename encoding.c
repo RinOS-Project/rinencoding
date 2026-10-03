@@ -113,6 +113,17 @@ static int rin_encoding_base64_space(unsigned char value)
            value == (unsigned char)'\r' || value == (unsigned char)'\n';
 }
 
+static int rin_encoding_base64_flags_valid(unsigned flags)
+{
+    const unsigned known_flags =
+        RIN_ENCODING_BASE64_PADDING_REQUIRED |
+        RIN_ENCODING_BASE64_ALLOW_UNPADDED |
+        RIN_ENCODING_BASE64_ALLOW_WHITESPACE;
+    return (flags & ~known_flags) == 0u &&
+           !((flags & RIN_ENCODING_BASE64_PADDING_REQUIRED) != 0u &&
+             (flags & RIN_ENCODING_BASE64_ALLOW_UNPADDED) != 0u);
+}
+
 int rin_encoding_base64_decode(const uint8_t* input, size_t input_size,
                                RinEncodingBase64Alphabet alphabet,
                                unsigned flags, uint8_t* output,
@@ -133,8 +144,7 @@ int rin_encoding_base64_decode(const uint8_t* input, size_t input_size,
         alphabet != RIN_ENCODING_BASE64_URL_SAFE)
         return rin_encoding_failure(output, output_capacity, output_size,
                                     RIN_ENCODING_INVALID_ARGUMENT);
-    if ((flags & RIN_ENCODING_BASE64_PADDING_REQUIRED) != 0u &&
-        (flags & RIN_ENCODING_BASE64_ALLOW_UNPADDED) != 0u)
+    if (!rin_encoding_base64_flags_valid(flags))
         return rin_encoding_failure(output, output_capacity, output_size,
                                     RIN_ENCODING_INVALID_ARGUMENT);
     allow_unpadded = (flags & RIN_ENCODING_BASE64_ALLOW_UNPADDED) != 0u;
@@ -702,8 +712,7 @@ int rin_encoding_base64_decoder_init(RinEncodingBase64Decoder* decoder,
 {
     size_t index;
     if (decoder == NULL || !rin_encoding_base64_alphabet_valid(alphabet) ||
-        ((flags & RIN_ENCODING_BASE64_PADDING_REQUIRED) != 0u &&
-         (flags & RIN_ENCODING_BASE64_ALLOW_UNPADDED) != 0u))
+        !rin_encoding_base64_flags_valid(flags))
         return RIN_ENCODING_INVALID_ARGUMENT;
     decoder->alphabet = alphabet;
     decoder->flags = flags;
