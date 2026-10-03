@@ -570,6 +570,15 @@ static void rin_encoding_base64_emit_block(
         output[(*written)++] = (uint8_t)'=';
 }
 
+static int rin_encoding_base64_encoder_state_valid(
+    const RinEncodingBase64Encoder* encoder)
+{
+    return encoder != NULL &&
+           rin_encoding_base64_alphabet_valid(encoder->alphabet) &&
+           encoder->padded <= 1u && encoder->finalized <= 1u &&
+           encoder->tail_size <= 2u;
+}
+
 int rin_encoding_base64_encoder_init(RinEncodingBase64Encoder* encoder,
                                      RinEncodingBase64Alphabet alphabet,
                                      int padded)
@@ -598,9 +607,8 @@ int rin_encoding_base64_encoder_update(RinEncodingBase64Encoder* encoder,
     if (input_consumed == NULL ||
         !rin_encoding_output_valid(output, output_capacity, output_size))
         return RIN_ENCODING_INVALID_ARGUMENT;
-    if (encoder == NULL || encoder->finalized != 0u ||
-        !rin_encoding_base64_alphabet_valid(encoder->alphabet) ||
-        encoder->tail_size > 2u ||
+    if (!rin_encoding_base64_encoder_state_valid(encoder) ||
+        encoder->finalized != 0u ||
         (input_size != 0u && input == NULL))
         return RIN_ENCODING_INVALID_ARGUMENT;
 
@@ -640,9 +648,8 @@ int rin_encoding_base64_encoder_final(RinEncodingBase64Encoder* encoder,
     size_t written = 0u;
     if (!rin_encoding_output_valid(output, output_capacity, output_size))
         return RIN_ENCODING_INVALID_ARGUMENT;
-    if (encoder == NULL || encoder->finalized != 0u ||
-        !rin_encoding_base64_alphabet_valid(encoder->alphabet) ||
-        encoder->tail_size > 2u || encoder->padded > 1u)
+    if (!rin_encoding_base64_encoder_state_valid(encoder) ||
+        encoder->finalized != 0u)
         return RIN_ENCODING_INVALID_ARGUMENT;
     if (encoder->tail_size == 0u) {
         encoder->finalized = 1u;
