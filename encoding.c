@@ -943,7 +943,7 @@ int rin_encoding_quoted_printable_decode(const uint8_t* input,
             output[written++] = value;
             continue;
         }
-        if (index + 1u >= input_size)
+        if (input_size - index < 2u)
             return rin_encoding_failure(
                 output, output_capacity, output_size,
                 RIN_ENCODING_MALFORMED);
@@ -952,7 +952,7 @@ int rin_encoding_quoted_printable_decode(const uint8_t* input,
             continue;
         }
         if (input[index + 1u] == (uint8_t)'\r') {
-            if (index + 2u >= input_size ||
+            if (input_size - index < 3u ||
                 input[index + 2u] != (uint8_t)'\n')
                 return rin_encoding_failure(
                     output, output_capacity, output_size,
@@ -960,7 +960,7 @@ int rin_encoding_quoted_printable_decode(const uint8_t* input,
             index += 2u;
             continue;
         }
-        if (index + 2u >= input_size)
+        if (input_size - index < 3u)
             return rin_encoding_failure(output, output_capacity, output_size,
                                         RIN_ENCODING_MALFORMED);
         {
@@ -1009,7 +1009,7 @@ int rin_encoding_rfc2047_decode_payload(char encoding, const uint8_t* input,
         if (value == (uint8_t)'=') {
             int high;
             int low;
-            if (index + 2u >= input_size)
+            if (input_size - index < 3u)
                 return rin_encoding_failure(
                     output, output_capacity, output_size,
                     RIN_ENCODING_MALFORMED);
@@ -1114,7 +1114,7 @@ int rin_encoding_percent_decode(const uint8_t* input, size_t input_size,
             output[written++] = input[index];
             continue;
         }
-        if (index + 2u >= input_size)
+        if (input_size - index < 3u)
             return rin_encoding_failure(output, output_capacity, output_size,
                                         RIN_ENCODING_MALFORMED);
         {
