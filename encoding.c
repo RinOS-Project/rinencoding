@@ -884,7 +884,9 @@ int rin_encoding_hex_decode(const uint8_t* input, size_t input_size,
     for (index = 0u; index < required; ++index) {
         const int high = rin_encoding_hex_digit(input[index * 2u]);
         const int low = rin_encoding_hex_digit(input[index * 2u + 1u]);
-        if (high < 0 || low < 0) return RIN_ENCODING_MALFORMED;
+        if (high < 0 || low < 0)
+            return rin_encoding_failure(output, output_capacity, output_size,
+                                        RIN_ENCODING_MALFORMED);
         output[index] = (uint8_t)((high << 4) | low);
     }
     *output_size = required;
@@ -905,11 +907,16 @@ int rin_encoding_quoted_printable_decode(const uint8_t* input,
         const uint8_t value = input[index];
         if (value != (uint8_t)'=') {
             if (written >= output_capacity || output == NULL)
-                return RIN_ENCODING_BUFFER_TOO_SMALL;
+                return rin_encoding_failure(
+                    output, output_capacity, output_size,
+                    RIN_ENCODING_BUFFER_TOO_SMALL);
             output[written++] = value;
             continue;
         }
-        if (index + 1u >= input_size) return RIN_ENCODING_MALFORMED;
+        if (index + 1u >= input_size)
+            return rin_encoding_failure(
+                output, output_capacity, output_size,
+                RIN_ENCODING_MALFORMED);
         if (input[index + 1u] == (uint8_t)'\n') {
             ++index;
             continue;
@@ -917,17 +924,26 @@ int rin_encoding_quoted_printable_decode(const uint8_t* input,
         if (input[index + 1u] == (uint8_t)'\r') {
             if (index + 2u >= input_size ||
                 input[index + 2u] != (uint8_t)'\n')
-                return RIN_ENCODING_MALFORMED;
+                return rin_encoding_failure(
+                    output, output_capacity, output_size,
+                    RIN_ENCODING_MALFORMED);
             index += 2u;
             continue;
         }
-        if (index + 2u >= input_size) return RIN_ENCODING_MALFORMED;
+        if (index + 2u >= input_size)
+            return rin_encoding_failure(output, output_capacity, output_size,
+                                        RIN_ENCODING_MALFORMED);
         {
             const int high = rin_encoding_hex_digit(input[index + 1u]);
             const int low = rin_encoding_hex_digit(input[index + 2u]);
-            if (high < 0 || low < 0) return RIN_ENCODING_MALFORMED;
+            if (high < 0 || low < 0)
+                return rin_encoding_failure(
+                    output, output_capacity, output_size,
+                    RIN_ENCODING_MALFORMED);
             if (written >= output_capacity || output == NULL)
-                return RIN_ENCODING_BUFFER_TOO_SMALL;
+                return rin_encoding_failure(
+                    output, output_capacity, output_size,
+                    RIN_ENCODING_BUFFER_TOO_SMALL);
             output[written++] = (uint8_t)((high << 4) | low);
         }
         index += 2u;
@@ -963,26 +979,40 @@ int rin_encoding_rfc2047_decode_payload(char encoding, const uint8_t* input,
         if (value == (uint8_t)'=') {
             int high;
             int low;
-            if (index + 2u >= input_size) return RIN_ENCODING_MALFORMED;
+            if (index + 2u >= input_size)
+                return rin_encoding_failure(
+                    output, output_capacity, output_size,
+                    RIN_ENCODING_MALFORMED);
             high = rin_encoding_hex_digit(input[index + 1u]);
             low = rin_encoding_hex_digit(input[index + 2u]);
-            if (high < 0 || low < 0) return RIN_ENCODING_MALFORMED;
+            if (high < 0 || low < 0)
+                return rin_encoding_failure(
+                    output, output_capacity, output_size,
+                    RIN_ENCODING_MALFORMED);
             if (written >= output_capacity || output == NULL)
-                return RIN_ENCODING_BUFFER_TOO_SMALL;
+                return rin_encoding_failure(
+                    output, output_capacity, output_size,
+                    RIN_ENCODING_BUFFER_TOO_SMALL);
             output[written++] = (uint8_t)((high << 4) | low);
             index += 2u;
             continue;
         }
         if (value == (uint8_t)'_') {
             if (written >= output_capacity || output == NULL)
-                return RIN_ENCODING_BUFFER_TOO_SMALL;
+                return rin_encoding_failure(
+                    output, output_capacity, output_size,
+                    RIN_ENCODING_BUFFER_TOO_SMALL);
             output[written++] = (uint8_t)' ';
             continue;
         }
         if (value < 0x21u || value > 0x7eu || value == (uint8_t)'?')
-            return RIN_ENCODING_MALFORMED;
+            return rin_encoding_failure(
+                output, output_capacity, output_size,
+                RIN_ENCODING_MALFORMED);
         if (written >= output_capacity || output == NULL)
-            return RIN_ENCODING_BUFFER_TOO_SMALL;
+            return rin_encoding_failure(
+                output, output_capacity, output_size,
+                RIN_ENCODING_BUFFER_TOO_SMALL);
         output[written++] = value;
     }
     *output_size = written;
@@ -1045,18 +1075,25 @@ int rin_encoding_percent_decode(const uint8_t* input, size_t input_size,
     if (!rin_encoding_output_valid(output, output_capacity, output_size))
         return RIN_ENCODING_INVALID_ARGUMENT;
     if (input_size != 0u && input == NULL) return RIN_ENCODING_INVALID_ARGUMENT;
-    if (input_size > output_capacity) return RIN_ENCODING_BUFFER_TOO_SMALL;
+    if (input_size > output_capacity)
+        return rin_encoding_failure(output, output_capacity, output_size,
+                                    RIN_ENCODING_BUFFER_TOO_SMALL);
     if (input_size != 0u && output == NULL) return RIN_ENCODING_INVALID_ARGUMENT;
     for (index = 0u; index < input_size; ++index) {
         if (input[index] != '%') {
             output[written++] = input[index];
             continue;
         }
-        if (index + 2u >= input_size) return RIN_ENCODING_MALFORMED;
+        if (index + 2u >= input_size)
+            return rin_encoding_failure(output, output_capacity, output_size,
+                                        RIN_ENCODING_MALFORMED);
         {
             const int high = rin_encoding_hex_digit(input[index + 1u]);
             const int low = rin_encoding_hex_digit(input[index + 2u]);
-            if (high < 0 || low < 0) return RIN_ENCODING_MALFORMED;
+            if (high < 0 || low < 0)
+                return rin_encoding_failure(
+                    output, output_capacity, output_size,
+                    RIN_ENCODING_MALFORMED);
             output[written++] = (uint8_t)((high << 4) | low);
         }
         index += 2u;
